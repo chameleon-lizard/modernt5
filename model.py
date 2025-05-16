@@ -20,7 +20,7 @@ def add_rope_to_t5_decoder(decoder, max_position_embeddings=8192):
         d = sa.q.weight.shape[0] // sa.n_heads
 
         # Initialize RoPE
-        sa.rotary_emb = RotaryEmbedding(dim=d, use_xpos=True, base=10000, interleaved=False, max_seq_len=max_position_embeddings)
+        sa.rotary_emb = RotaryEmbedding(dim=d, use_xpos=True, theta=10000, interleaved=False, max_seq_len=max_position_embeddings)
 
         # Save the original forward
         orig_forward = sa.forward

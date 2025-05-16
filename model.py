@@ -17,7 +17,7 @@ decoder = AutoModelForSeq2SeqLM.from_pretrained(decoder_model_name)
 def add_rope_to_t5_decoder(decoder, max_position_embeddings=8192):
     for layer in decoder.decoder.block:
         sa = layer.layer[0].SelfAttention
-        d = sa.q.shape[-1] // sa.num_heads
+        d = sa.q.weight.shape[0] // sa.num_heads
 
         # Initialize RoPE
         sa.rotary_emb = RotaryEmbedding(dim=d, use_xpos=True, base=10000, interleaved=False, max_seq_len=max_position_embeddings)

@@ -521,79 +521,6 @@ class ModernT5Model(ModernT5PreTrainedModel, GenerationMixin):
     def get_encoder(self): return self.encoder
     def get_decoder(self): return self.decoder
 
-    def _prepare_encoder_decoder_kwargs_for_generation(self, inputs_tensor: torch.Tensor, model_kwargs, model_input_name: Optional[str] = None):
-        # From T5 HuggingFace implementation
-        if "encoder_outputs" not in model_kwargs:
-            encoder_kwargs = {
-                k: v for k, v in model_kwargs.items()
-                if k not in ["decoder_input_ids", "decoder_attention_mask", "decoder_position_ids", "labels", "use_cache", "output_attentions", "output_hidden_states", "return_dict"]
-            }
-            # Encoder specific kwargs
-            # ModernBertModel needs attention_mask, optionally position_ids if not FA2
-            if "attention_mask" not in encoder_kwargs: # `generate` passes attention_mask for input_ids
-                 encoder_kwargs["attention_mask"] = torch.ones_like(inputs_tensor)
-
-            # If encoder uses RoPE and not FA2, it needs position_ids.
-            # `generate` does not typically provide `position_ids` for the encoder input.
-            if self.config._attn_implementation != "flash_attention_2":
-                 if "position_ids" not in encoder_kwargs:
-                    seq_len = inputs_tensor.shape[1]
-                    encoder_kwargs["position_ids"] = torch.arange(seq_len, device=inputs_tensor.device).unsqueeze(0).expand(inputs_tensor.shape[0], -1)
-
-            model_kwargs["encoder_outputs"] = self.encoder(inputs_tensor, **encoder_kwargs)
-        return model_kwargs
-
-    def _prepare_decoder_input_ids_for_generation(
-        self, batch_size: int, decoder_start_token_id: int = None, bos_token_id: int = None,
-        model_kwargs: Optional[Dict[str, torch.Tensor]] = None, device: torch.device = None
-    ) -> Tuple[torch.LongTensor, Dict[str, torch.Tensor]]:
-        # From T5 HF
-        if model_kwargs is None: model_kwargs = {}
-        if device is None: device = self.device
-
-        _decoder_start_token_id = decoder_start_token_id if decoder_start_token_id is not None else self.config.decoder_start_token_id
-        _bos_token_id = bos_token_id if bos_token_id is not None else self.config.bos_token_id # T5 uses pad as BOS
-        if _bos_token_id is None: _bos_token_id = _decoder_start_token_id # Fallback
-
-        if "decoder_input_ids" in model_kwargs:
-            decoder_input_ids = model_kwargs.pop("decoder_input_ids")
-        else:
-            decoder_input_ids = torch.ones((batch_size, 1), dtype=torch.long, device=device) * _bos_token_id
-        
-        # For RoPE, decoder_position_ids must be initialized for the first token (usually 0)
-        if "decoder_position_ids" not in model_kwargs:
-             model_kwargs["decoder_position_ids"] = torch.zeros_like(decoder_input_ids, dtype=torch.long)
-
-        return decoder_input_ids, model_kwargs
-
-    def prepare_inputs_for_generation(
-        self, decoder_input_ids, past_key_values=None, attention_mask=None, # encoder AM
-        decoder_attention_mask=None, decoder_position_ids=None, use_cache=None, encoder_outputs=None, **kwargs
-    ):
-        # From T5 HF, adapted for decoder_position_ids
-        if past_key_values is not None:
-            past_length = past_key_values[0][0].shape[2]
-            decoder_input_ids = decoder_input_ids[:, -1:]
-            if decoder_position_ids is not None: # If provided, take the last one
-                 decoder_position_ids = decoder_position_ids[:, -1:]
-            else: # Else, create for current token
-                 decoder_position_ids = torch.full_like(decoder_input_ids, past_length, dtype=torch.long)
-        elif decoder_position_ids is None: # First step, if not provided
-            decoder_position_ids = torch.zeros_like(decoder_input_ids, dtype=torch.long)
-
-        model_inputs = {
-            "decoder_input_ids": decoder_input_ids,
-            "past_key_values": past_key_values,
-            "encoder_outputs": encoder_outputs,
-            "attention_mask": attention_mask, # Encoder attention mask
-            "decoder_attention_mask": decoder_attention_mask, # Decoder padding mask
-            "decoder_position_ids": decoder_position_ids, # For RoPE
-            "use_cache": use_cache,
-        }
-        model_inputs.update(kwargs) # Pass along other relevant kwargs
-        return {k: v for k, v in model_inputs.items() if v is not None}
-
-
     # @add_start_docstrings_to_model_forward(MODERNBERT_INPUTS_DOCSTRING.replace("ModernBert", "ModernT5"))
     # @replace_return_docstrings(output_type=Seq2SeqModelOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
@@ -689,6 +616,51 @@ class ModernT5ForConditionalGeneration(ModernT5PreTrainedModel, GenerationMixin)
     def set_output_embeddings(self, new_embeddings): self.lm_head = new_embeddings
     def get_encoder(self): return self.model.get_encoder()
     def get_decoder(self): return self.model.get_decoder()
+
+    def _prepare_encoder_decoder_kwargs_for_generation(self, inputs_tensor: torch.Tensor, model_kwargs, model_input_name: Optional[str] = None):
+        # From T5 HuggingFace implementation
+        if "encoder_outputs" not in model_kwargs:
+            encoder_kwargs = {
+                k: v for k, v in model_kwargs.items()
+                if k not in ["decoder_input_ids", "decoder_attention_mask", "decoder_position_ids", "labels", "use_cache", "output_attentions", "output_hidden_states", "return_dict"]
+            }
+            # Encoder specific kwargs
+            # ModernBertModel needs attention_mask, optionally position_ids if not FA2
+            if "attention_mask" not in encoder_kwargs: # `generate` passes attention_mask for input_ids
+                 encoder_kwargs["attention_mask"] = torch.ones_like(inputs_tensor)
+
+            # If encoder uses RoPE and not FA2, it needs position_ids.
+            # `generate` does not typically provide `position_ids` for the encoder input.
+            if self.config._attn_implementation != "flash_attention_2":
+                 if "position_ids" not in encoder_kwargs:
+                    seq_len = inputs_tensor.shape[1]
+                    encoder_kwargs["position_ids"] = torch.arange(seq_len, device=inputs_tensor.device).unsqueeze(0).expand(inputs_tensor.shape[0], -1)
+
+            model_kwargs["encoder_outputs"] = self.model.encoder(inputs_tensor, **encoder_kwargs)
+        return model_kwargs
+
+    def _prepare_decoder_input_ids_for_generation(
+        self, batch_size: int, decoder_start_token_id: int = None, bos_token_id: int = None,
+        model_kwargs: Optional[Dict[str, torch.Tensor]] = None, device: torch.device = None
+    ) -> Tuple[torch.LongTensor, Dict[str, torch.Tensor]]:
+        # From T5 HF
+        if model_kwargs is None: model_kwargs = {}
+        if device is None: device = self.device
+
+        _decoder_start_token_id = decoder_start_token_id if decoder_start_token_id is not None else self.config.decoder_start_token_id
+        _bos_token_id = bos_token_id if bos_token_id is not None else self.config.bos_token_id # T5 uses pad as BOS
+        if _bos_token_id is None: _bos_token_id = _decoder_start_token_id # Fallback
+
+        if "decoder_input_ids" in model_kwargs:
+            decoder_input_ids = model_kwargs.pop("decoder_input_ids")
+        else:
+            decoder_input_ids = torch.ones((batch_size, 1), dtype=torch.long, device=device) * _bos_token_id
+        
+        # For RoPE, decoder_position_ids must be initialized for the first token (usually 0)
+        if "decoder_position_ids" not in model_kwargs:
+             model_kwargs["decoder_position_ids"] = torch.zeros_like(decoder_input_ids, dtype=torch.long)
+
+        return decoder_input_ids, model_kwargs
 
     def _shift_right(self, input_ids): # T5 utility
         decoder_start_token_id = self.config.decoder_start_token_id
@@ -798,9 +770,32 @@ class ModernT5ForConditionalGeneration(ModernT5PreTrainedModel, GenerationMixin)
             encoder_hidden_states=outputs.encoder_hidden_states, encoder_attentions=outputs.encoder_attentions,
         )
 
-    def prepare_inputs_for_generation(self, *args, **kwargs): # Wrapper
-        # `decoder_position_ids` is handled by `self.model.prepare_inputs_for_generation`
-        return self.model.prepare_inputs_for_generation(*args, **kwargs)
+    def prepare_inputs_for_generation(
+        self, decoder_input_ids, past_key_values=None, attention_mask=None, # encoder AM
+        decoder_attention_mask=None, decoder_position_ids=None, use_cache=None, encoder_outputs=None, **kwargs
+    ):
+        # From T5 HF, adapted for decoder_position_ids
+        if past_key_values is not None:
+            past_length = past_key_values[0][0].shape[2]
+            decoder_input_ids = decoder_input_ids[:, -1:]
+            if decoder_position_ids is not None: # If provided, take the last one
+                 decoder_position_ids = decoder_position_ids[:, -1:]
+            else: # Else, create for current token
+                 decoder_position_ids = torch.full_like(decoder_input_ids, past_length, dtype=torch.long)
+        elif decoder_position_ids is None: # First step, if not provided
+            decoder_position_ids = torch.zeros_like(decoder_input_ids, dtype=torch.long)
+
+        model_inputs = {
+            "decoder_input_ids": decoder_input_ids,
+            "past_key_values": past_key_values,
+            "encoder_outputs": encoder_outputs,
+            "attention_mask": attention_mask, # Encoder attention mask
+            "decoder_attention_mask": decoder_attention_mask, # Decoder padding mask
+            "decoder_position_ids": decoder_position_ids, # For RoPE
+            "use_cache": use_cache,
+        }
+        model_inputs.update(kwargs) # Pass along other relevant kwargs
+        return {k: v for k, v in model_inputs.items() if v is not None}
 
     @staticmethod
     def _reorder_cache(past_key_values, beam_idx): # Standard for beam search

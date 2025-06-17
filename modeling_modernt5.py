@@ -833,7 +833,7 @@ if __name__ == '__main__':
     # ModernBertModel is imported at the top of the file, so it's available here.
 
     # --- 1. Load Pretrained Encoder and Tokenizer ---
-    encoder_name = "deepvk/RuModernBERT-base"
+    encoder_name = "deepvk/RuModernBERT-small"
     print(f"Loading pretrained encoder and tokenizer from: {encoder_name}")
     
     # Load the encoder model. This requires the ModernBertModel class to be available.
@@ -850,8 +850,8 @@ if __name__ == '__main__':
     # copy encoder properties to the decoder if decoder-specific ones are not provided.
     config = ModernT5Config(
         **encoder_config.to_dict(),
-        decoder_start_token_id=tokenizer.bos_token_id, # Use BOS for decoder start
-        tie_word_embeddings=True,
+        # decoder_start_token_id=tokenizer.bos_token_id, # Use BOS for decoder start
+        # tie_word_embeddings=True,
     )
     
     # --- 3. Initialize the Model and Set Pretrained Encoder ---

@@ -899,7 +899,7 @@ if __name__ == '__main__':
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     
     # Generate output
-    generated_ids = loaded_model.generate(inputs.input_ids, max_length=50)
+    generated_ids = loaded_model.generate(**inputs, max_length=50)
     decoded_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
     
     print(f"Input: '{prompt}'")

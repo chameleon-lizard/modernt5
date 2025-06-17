@@ -11,7 +11,6 @@ from transformers import (
 
 from modeling_modernt5 import ModernT5ForConditionalGeneration
 from collator import UL2MoDCollator
-import wandb
 
 
 def parse_args():
@@ -42,6 +41,12 @@ def parse_args():
 def main():
     # Parse arguments
     args = parse_args()
+
+    # Set wandb environment variables for Trainer integration
+    os.environ["WANDB_PROJECT"] = "ModernT5"
+    os.environ["WANDB_RUN_NAME"] = "modernt5_pretrain_test_lr"
+    os.environ["WANDB_TAGS"] = "pretrain"
+    os.environ["WANDB_WATCH"] = "gradients"
     
     # Setup logging
     logging.basicConfig(
@@ -129,19 +134,10 @@ def main():
         data_collator=data_collator,
     )
 
-    run = wandb.init(
-        name="modernt5_pretrain_test_lr",
-        project="ModernT5",
-        tags=["pretrain"],
-    )
-    wandb.watch(model, log=None, log_freq=10)
-
     # Train model
     logger.info("Starting training")
     trainer.train()
     
-    run.finish()
-
     # Save final model and tokenizer
     logger.info(f"Saving final model to {args.output_dir}")
     trainer.save_model(args.output_dir)

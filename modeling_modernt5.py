@@ -830,67 +830,79 @@ __all__ = [
 if __name__ == '__main__':
     import torch
     from transformers import AutoTokenizer
+    # ModernBertModel is imported at the top of the file, so it's available here.
 
-# Assuming the ModernT5Config and ModernT5ForConditionalGeneration classes
-# are defined in a file named 'modeling_modernt5.py' and are importable.
-# If not, you might need to add a path or adjust the import.
-    # from modeling_modernt5 import ModernT5Config, ModernT5ForConditionalGeneration
-
-# 1. Create a configuration
+    # --- 1. Load Pretrained Encoder and Tokenizer ---
+    encoder_name = "deepvk/RuModernBERT-base"
+    print(f"Loading pretrained encoder and tokenizer from: {encoder_name}")
+    
+    # Load the encoder model. This requires the ModernBertModel class to be available.
+    encoder = ModernBertModel.from_pretrained(encoder_name)
+    tokenizer = AutoTokenizer.from_pretrained(encoder_name)
+    
+    # --- 2. Configure the Encoder-Decoder Model ---
+    # We will create a ModernT5 model. The encoder part will be replaced by our loaded one.
+    # The decoder can be configured symmetrically to the encoder.
+    print("Configuring ModernT5 model...")
+    encoder_config = encoder.config
+    
+    # Create a ModernT5Config using the encoder's config. It will automatically
+    # copy encoder properties to the decoder if decoder-specific ones are not provided.
     config = ModernT5Config(
-        vocab_size=50368,
-        hidden_size=768,              # Changed from d_model
-        intermediate_size=1152,       # Changed from d_ff
-        num_hidden_layers=22,,          # Changed from num_layers
-        num_attention_heads=12,        # Changed from num_heads
-        pad_token_id=50283,
-        eos_token_id=50282,
-        decoder_start_token_id=50281,
-        tie_word_embeddings=True, # Note: Also review tie_word_embeddings logic below
+        **encoder_config.to_dict(),
+        decoder_start_token_id=tokenizer.bos_token_id, # Use BOS for decoder start
+        tie_word_embeddings=True,
     )
-
-# 2. Load the model from config
+    
+    # --- 3. Initialize the Model and Set Pretrained Encoder ---
+    print("Initializing ModernT5ForConditionalGeneration with random weights...")
     model = ModernT5ForConditionalGeneration(config)
-
-# Move to GPU if available
-    if torch.cuda.is_available():
-        model.cuda()
-        print("Model moved to GPU")
-    else:
-        print("Running on CPU")
-
-# 3. Print the number of parameters
+    
+    print(f"Replacing encoder with pretrained '{encoder_name}'...")
+    model.encoder = encoder
+    
+    print("Tying word embeddings between encoder, decoder, and LM head...")
+    # Ensure the embeddings are shared across the new encoder, the decoder, and the LM head
+    model.set_input_embeddings(model.encoder.get_input_embeddings())
+    
+    # --- 4. Final Steps (Verification, Saving) ---
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device)
+    print(f"Model moved to {device.upper()}")
+    
+    # Print parameter count
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Number of trainable parameters: {num_params / 1e6:.2f} M")
-
-# 4. Save the model and tokenizer
-    save_directory = "./modernt5_checkpoint"
+    
+    # Save the composed model and the tokenizer
+    save_directory = "./modernt5_from_rumodernbert"
+    print(f"Saving model and tokenizer to {save_directory}...")
     model.save_pretrained(save_directory)
-
-# You would typically also save a tokenizer used with this model.
-# For demonstration, let's use a dummy tokenizer config
-    try:
-        tokenizer = AutoTokenizer.from_pretrained("./modernt5_tokenizer") # Use a standard T5 tokenizer for example
-        tokenizer.save_pretrained(save_directory)
-        print(f"Model and tokenizer saved to {save_directory}")
-    except Exception as e:
-        print(f"Could not save a real tokenizer (requires internet): {e}. Skipping tokenizer save.")
-        print(f"Model saved to {save_directory}")
-
-
-# 5. Load the model from the saved checkpoint
+    tokenizer.save_pretrained(save_directory)
+    print("Save complete.")
+    
+    # --- 5. Load and Test ---
     print(f"\nLoading model from {save_directory}...")
     loaded_model = ModernT5ForConditionalGeneration.from_pretrained(save_directory)
-
-# Verify it's loaded
+    loaded_model.to(device)
     print("Model loaded successfully from checkpoint.")
-
-# Optionally, move the loaded model to GPU as well
-    if torch.cuda.is_available():
-        loaded_model.cuda()
-
-# You can now use loaded_model for inference or further training.
-# Example: A dummy forward pass (requires dummy inputs)
-    dummy_input_ids = torch.randint(0, config.vocab_size, (1, 10)).to(model.device)
-    dummy_output = loaded_model(input_ids=dummy_input_ids)
-    print("Dummy forward pass successful with loaded model.")
+    
+    # Test with a dummy forward pass
+    print("Performing a dummy forward pass...")
+    dummy_input_ids = torch.randint(0, config.vocab_size, (2, 16)).to(device)
+    dummy_labels = torch.randint(0, config.vocab_size, (2, 10)).to(device)
+    dummy_output = loaded_model(input_ids=dummy_input_ids, labels=dummy_labels)
+    print(f"Dummy forward pass successful. Loss: {dummy_output.loss.item():.4f}")
+    
+    # Test generation
+    print("\nPerforming a dummy generation...")
+    # Use the tokenizer to prepare input
+    prompt = "Перевод с русского на английский: как дела?"
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    
+    # Generate output
+    generated_ids = loaded_model.generate(inputs.input_ids, max_length=50)
+    decoded_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
+    
+    print(f"Input: '{prompt}'")
+    print(f"Generated output: '{decoded_text}'")

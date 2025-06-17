@@ -896,7 +896,7 @@ if __name__ == '__main__':
     # Use the tokenizer to prepare input
     prompt = "Перевод с русского на английский: как дела?"
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
-    
+
     # Generate output
     generated_ids = loaded_model.generate(**inputs, max_length=50)
     decoded_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True)

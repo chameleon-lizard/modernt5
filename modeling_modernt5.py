@@ -616,7 +616,7 @@ class ModernT5ForConditionalGeneration(ModernT5PreTrainedModel, GenerationMixin)
     def get_encoder(self): return self.model.get_encoder()
     def get_decoder(self): return self.model.get_decoder()
 
-    def _prepare_encoder_decoder_kwargs_for_generation(self, inputs_tensor: torch.Tensor, model_kwargs, model_input_name: Optional[str] = None, **kwargs):
+    def _prepare_encoder_decoder_kwargs_for_generation(self, inputs_tensor: torch.Tensor, model_kwargs, model_input_name: Optional[str] = None, generation_config=None, **kwargs):
         # From T5 HuggingFace implementation
         if "encoder_outputs" not in model_kwargs:
             encoder_kwargs = {

@@ -838,14 +838,14 @@ if __name__ == '__main__':
 
 # 1. Create a configuration
     config = ModernT5Config(
-        vocab_size=33280,
-        hidden_size=800,              # Changed from d_model
-        intermediate_size=1920,       # Changed from d_ff
-        num_hidden_layers=18,          # Changed from num_layers
-        num_attention_heads=10,        # Changed from num_heads
-        pad_token_id=0,
-        eos_token_id=1,
-        decoder_start_token_id=0,
+        vocab_size=50368,
+        hidden_size=768,              # Changed from d_model
+        intermediate_size=1152,       # Changed from d_ff
+        num_hidden_layers=22,,          # Changed from num_layers
+        num_attention_heads=12,        # Changed from num_heads
+        pad_token_id=50283,
+        eos_token_id=50282,
+        decoder_start_token_id=50281,
         tie_word_embeddings=True, # Note: Also review tie_word_embeddings logic below
     )
 

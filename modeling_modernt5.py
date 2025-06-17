@@ -639,8 +639,13 @@ class ModernT5ForConditionalGeneration(ModernT5PreTrainedModel, GenerationMixin)
         return model_kwargs
 
     def _prepare_decoder_input_ids_for_generation(
-        self, batch_size: int, decoder_start_token_id: int = None, bos_token_id: int = None,
-        model_kwargs: Optional[Dict[str, torch.Tensor]] = None, device: torch.device = None
+        self,
+        batch_size: int,
+        decoder_start_token_id: int = None,
+        bos_token_id: int = None,
+        model_kwargs: Optional[Dict[str, torch.Tensor]] = None,
+        device: torch.device = None,
+        **kwargs,
     ) -> Tuple[torch.LongTensor, Dict[str, torch.Tensor]]:
         # From T5 HF
         if model_kwargs is None: model_kwargs = {}

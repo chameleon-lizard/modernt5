@@ -833,6 +833,11 @@ if __name__ == '__main__':
     # Load the encoder model. This requires the ModernBertModel class to be available.
     encoder = ModernBertModel.from_pretrained(encoder_name)
     tokenizer = AutoTokenizer.from_pretrained(encoder_name)
+
+    # Set BOS token if not present. For many BERT-like models, CLS serves this role.
+    if tokenizer.bos_token is None:
+        print("Tokenizer does not have a BOS token. Setting bos_token to cls_token.")
+        tokenizer.bos_token = tokenizer.cls_token
     
     # --- 2. Configure the Encoder-Decoder Model ---
     # We will create a ModernT5 model. The encoder part will be replaced by our loaded one.
@@ -843,8 +848,9 @@ if __name__ == '__main__':
     # Create a ModernT5Config using the encoder's config. It will automatically
     # copy encoder properties to the decoder if decoder-specific ones are not provided.
     encoder_config_dict = encoder_config.to_dict()
-    encoder_config_dict['decoder_start_token_id'] == tokenizer.bos_token_id
-    encoder_config_dict['tie_word_embeddings'] == True
+    # Correctly assign values to the config dictionary
+    encoder_config_dict['decoder_start_token_id'] = tokenizer.bos_token_id
+    encoder_config_dict['tie_word_embeddings'] = True
     config = ModernT5Config(
         **encoder_config_dict,
     )

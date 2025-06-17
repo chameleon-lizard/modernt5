@@ -16,13 +16,13 @@ import wandb
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train ModernT5ForConditionalGeneration model")
-    parser.add_argument("--model_path", type=str, default="modernt5_checkpoint", 
+    parser.add_argument("--model_path", type=str, default="modernt5_from_rumodernbert", 
                         help="Path to the model checkpoint directory")
     parser.add_argument("--dataset_dir", type=str, default="final_pretrain_mix_tokenized", 
                         help="Path to the dataset directory")
     parser.add_argument("--output_dir", type=str, default="./results", 
                         help="Directory to save model checkpoints")
-    parser.add_argument("--max_seq_length", type=int, default=512, 
+    parser.add_argument("--max_seq_length", type=int, default=2048, 
                         help="Maximum sequence length")
     parser.add_argument("--per_device_train_batch_size", type=int, default=8, 
                         help="Batch size per GPU/TPU")
@@ -90,13 +90,13 @@ def main():
     )
 
     effective_bs = 512
-    bs = 128
+    bs = 512
     grad_accum_steps = effective_bs // bs
     
     # Define training arguments
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        num_train_epochs=2,
+        num_train_epochs=3,
         learning_rate=1e-2,
         logging_dir=f"{args.output_dir}/logs",
         logging_steps=1,

@@ -64,6 +64,13 @@ def main():
     # Load tokenizer and model
     logger.info(f"Loading tokenizer and model from {args.model_path}")
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+
+    if tokenizer.eos_token_id is None:
+        # BERT-style models often use sep_token as the eos token.
+        # The decoder config in model.py also uses sep_token_id for eos_token_id.
+        logger.info("Tokenizer does not have an EOS token. Setting eos_token to sep_token.")
+        tokenizer.eos_token = tokenizer.sep_token
+    
     model = ModernT5ForConditionalGeneration.from_pretrained(args.model_path)
 
     # Ensure model vocab size is adequate for tokenizer + collator-generated sentinels.
@@ -144,4 +151,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

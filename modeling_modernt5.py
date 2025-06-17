@@ -486,7 +486,6 @@ class ModernT5Stack(ModernT5PreTrainedModel): # Decoder stack
     MODERNBERT_START_DOCSTRING,
 )
 class ModernT5Model(ModernT5PreTrainedModel, GenerationMixin):
-
     def __init__(self, config: ModernT5Config):
         super().__init__(config)
         self.config = config
@@ -738,8 +737,8 @@ class ModernT5ForConditionalGeneration(ModernT5PreTrainedModel, GenerationMixin)
             )
             if decoder_position_ids is None: # For the first token, position is 0
                 decoder_position_ids = torch.zeros_like(decoder_input_ids, dtype=torch.long, device=current_device)
-
-
+        
+        print(f'Input ids during forward/generation: {input_ids=}')
         outputs = self.model(
             input_ids=input_ids, attention_mask=attention_mask, position_ids=position_ids, inputs_embeds=inputs_embeds,
             decoder_input_ids=decoder_input_ids, decoder_attention_mask=decoder_attention_mask,
@@ -822,7 +821,7 @@ if __name__ == '__main__':
     # ModernBertModel is imported at the top of the file, so it's available here.
 
     # --- 1. Load Pretrained Encoder and Tokenizer ---
-    encoder_name = "deepvk/RuModernBERT-base"
+    encoder_name = "deepvk/RuModernBERT-small"
     print(f"Loading pretrained encoder and tokenizer from: {encoder_name}")
     
     # Load the encoder model. This requires the ModernBertModel class to be available.

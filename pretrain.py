@@ -18,7 +18,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train ModernT5ForConditionalGeneration model")
     parser.add_argument("--model_path", type=str, default="modernt5_checkpoint", 
                         help="Path to the model checkpoint directory")
-    parser.add_argument("--dataset_dir", type=str, default="final_pretrain_mix", 
+    parser.add_argument("--dataset_dir", type=str, default="final_pretrain_mix_tokenized", 
                         help="Path to the dataset directory")
     parser.add_argument("--output_dir", type=str, default="./results", 
                         help="Directory to save model checkpoints")
@@ -90,23 +90,24 @@ def main():
     )
 
     effective_bs = 512
-    bs = 1
+    bs = 128
     grad_accum_steps = effective_bs // bs
     
     # Define training arguments
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        num_train_epochs=1,
-        learning_rate=5.5e-4,
+        num_train_epochs=2,
+        learning_rate=1e-2,
         logging_dir=f"{args.output_dir}/logs",
         logging_steps=1,
         per_device_train_batch_size=bs,
         gradient_accumulation_steps=grad_accum_steps,
         save_steps=250,
         save_total_limit=3,  # Only keep the 3 most recent checkpoints
-        warmup_steps=40,
+        warmup_steps=1000,
         weight_decay=0.1,
-        optim='paged_adamw_8bit',
+        max_grad_norm=1.0,
+        optim='adamw_torch_fused',
         lr_scheduler_type='cosine',
         remove_unused_columns=False,  # Required for custom collator
         report_to="wandb",

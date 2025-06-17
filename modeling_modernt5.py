@@ -351,13 +351,9 @@ class ModernT5Stack(ModernT5PreTrainedModel): # Decoder stack
         super().__init__(config)
         self.config = config
 
-        self.embed_tokens = embed_tokens # Store the passed nn.Embedding module
-        if self.embed_tokens is not None:
-            # Use the EXACT nn.Embedding module passed in
-            self.tok_embeddings = self.embed_tokens
-        else:
-            # Create a new, independent nn.Embedding module if none was passed
-            self.tok_embeddings = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
+        self.embed_tokens = embed_tokens
+        if self.embed_tokens is None:
+            self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
 
         self.dropout = nn.Dropout(config.embedding_dropout if hasattr(config, 'embedding_dropout') else config.hidden_dropout_prob)
         self.layers = nn.ModuleList(
@@ -370,12 +366,10 @@ class ModernT5Stack(ModernT5PreTrainedModel): # Decoder stack
         self.post_init()
 
     def get_input_embeddings(self):
-        return self.tok_embeddings
+        return self.embed_tokens
 
     def set_input_embeddings(self, new_embeddings):
-        self.tok_embeddings = new_embeddings
-        if self.embed_tokens is not None: # If shared
-            self.embed_tokens = new_embeddings
+        self.embed_tokens = new_embeddings
 
     def _prepare_decoder_attention_mask(self, attention_mask, input_shape, inputs_embeds, past_key_values_length):
         combined_attention_mask = None
@@ -419,7 +413,7 @@ class ModernT5Stack(ModernT5PreTrainedModel): # Decoder stack
         input_shape = input_ids.shape if input_ids is not None else inputs_embeds.shape[:-1]
 
         if inputs_embeds is None:
-            inputs_embeds = self.tok_embeddings(input_ids)
+            inputs_embeds = self.embed_tokens(input_ids)
         hidden_states = self.dropout(inputs_embeds)
 
         past_key_values_length = past_key_values[0][0].shape[2] if past_key_values is not None else 0
@@ -678,7 +672,7 @@ class ModernT5ForConditionalGeneration(ModernT5PreTrainedModel, GenerationMixin)
                 "lm_head.weight",
                 "model.shared.weight",
                 "model.encoder.embeddings.tok_embeddings.weight",
-                "model.decoder.tok_embeddings.weight"
+                "model.decoder.embed_tokens.weight"
             ]
         else:
             self._tied_weights_keys = []
@@ -833,7 +827,7 @@ if __name__ == '__main__':
     # ModernBertModel is imported at the top of the file, so it's available here.
 
     # --- 1. Load Pretrained Encoder and Tokenizer ---
-    encoder_name = "deepvk/RuModernBERT-small"
+    encoder_name = "deepvk/RuModernBERT-base"
     print(f"Loading pretrained encoder and tokenizer from: {encoder_name}")
     
     # Load the encoder model. This requires the ModernBertModel class to be available.
@@ -850,8 +844,8 @@ if __name__ == '__main__':
     # copy encoder properties to the decoder if decoder-specific ones are not provided.
     config = ModernT5Config(
         **encoder_config.to_dict(),
-        # decoder_start_token_id=tokenizer.bos_token_id, # Use BOS for decoder start
-        # tie_word_embeddings=True,
+        decoder_start_token_id=tokenizer.bos_token_id, # Use BOS for decoder start
+        tie_word_embeddings=True,
     )
     
     # --- 3. Initialize the Model and Set Pretrained Encoder ---
@@ -859,11 +853,13 @@ if __name__ == '__main__':
     model = ModernT5ForConditionalGeneration(config)
     
     print(f"Replacing encoder with pretrained '{encoder_name}'...")
-    model.encoder = encoder
+    # The encoder is part of the `model` attribute of `ModernT5ForConditionalGeneration`.
+    model.model.encoder = encoder
     
     print("Tying word embeddings between encoder, decoder, and LM head...")
-    # Ensure the embeddings are shared across the new encoder, the decoder, and the LM head
-    model.set_input_embeddings(model.encoder.get_input_embeddings())
+    # Ensure the embeddings are shared across the new encoder, the decoder, and the LM head.
+    # We get the embeddings from the new encoder and set them for the whole model.
+    model.set_input_embeddings(model.get_encoder().get_input_embeddings())
     
     # --- 4. Final Steps (Verification, Saving) ---
     device = "cuda" if torch.cuda.is_available() else "cpu"

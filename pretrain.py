@@ -97,7 +97,7 @@ def main():
     )
 
     effective_bs = 512
-    bs = 512
+    bs = 128
     grad_accum_steps = effective_bs // bs
     
     # Define training arguments

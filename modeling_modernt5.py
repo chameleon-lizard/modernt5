@@ -635,7 +635,7 @@ class ModernT5ForConditionalGeneration(ModernT5PreTrainedModel, GenerationMixin)
                     seq_len = inputs_tensor.shape[1]
                     encoder_kwargs["position_ids"] = torch.arange(seq_len, device=inputs_tensor.device).unsqueeze(0).expand(inputs_tensor.shape[0], -1)
 
-            model_kwargs["encoder_outputs"] = self.model.encoder(inputs_tensor, **encoder_kwargs)
+            model_kwargs["encoder_outputs"] = self.model.encoder(input_ids=inputs_tensor, **encoder_kwargs)
         return model_kwargs
 
     def _prepare_decoder_input_ids_for_generation(
@@ -738,7 +738,6 @@ class ModernT5ForConditionalGeneration(ModernT5PreTrainedModel, GenerationMixin)
             if decoder_position_ids is None: # For the first token, position is 0
                 decoder_position_ids = torch.zeros_like(decoder_input_ids, dtype=torch.long, device=current_device)
         
-        print(f'Input ids during forward/generation: {input_ids=}')
         outputs = self.model(
             input_ids=input_ids, attention_mask=attention_mask, position_ids=position_ids, inputs_embeds=inputs_embeds,
             decoder_input_ids=decoder_input_ids, decoder_attention_mask=decoder_attention_mask,

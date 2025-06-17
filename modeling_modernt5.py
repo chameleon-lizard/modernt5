@@ -844,6 +844,7 @@ if __name__ == '__main__':
     # Correctly assign values to the config dictionary
     encoder_config_dict['decoder_start_token_id'] = tokenizer.bos_token_id
     encoder_config_dict['tie_word_embeddings'] = True
+    encoder_config_dict['is_encoder_decoder'] = True
     config = ModernT5Config(
         **encoder_config_dict,
     )

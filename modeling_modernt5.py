@@ -842,10 +842,11 @@ if __name__ == '__main__':
     
     # Create a ModernT5Config using the encoder's config. It will automatically
     # copy encoder properties to the decoder if decoder-specific ones are not provided.
+    encoder_config_dict = encoder_config.to_dict()
+    encoder_config_dict['decoder_start_token_id'] == tokenizer.bos_token_id
+    encoder_config_dict['tie_word_embeddings'] == True
     config = ModernT5Config(
-        **encoder_config.to_dict(),
-        decoder_start_token_id=tokenizer.bos_token_id, # Use BOS for decoder start
-        tie_word_embeddings=True,
+        **encoder_config_dict,
     )
     
     # --- 3. Initialize the Model and Set Pretrained Encoder ---

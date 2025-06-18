@@ -9,13 +9,16 @@ from transformers import (
     set_seed,
 )
 
+import torch._dynamo
+torch._dynamo.config.suppress_errors = True
+
 from modeling_modernt5 import ModernT5ForConditionalGeneration
 from collator import UL2MoDCollator
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train ModernT5ForConditionalGeneration model")
-    parser.add_argument("--model_path", type=str, default="modernt5_from_rumodernbert", 
+    parser.add_argument("--model_path", type=str, default="modernt5_tiny_frozen", 
                         help="Path to the model checkpoint directory")
     parser.add_argument("--dataset_dir", type=str, default="final_pretrain_mix_tokenized", 
                         help="Path to the dataset directory")
@@ -77,7 +80,7 @@ def main():
         tokenizer.eos_token = tokenizer.sep_token
     
     model = ModernT5ForConditionalGeneration.from_pretrained(args.model_path)
-
+    
     # Ensure model vocab size is adequate for tokenizer + collator-generated sentinels.
     # The UL2MoDCollator's fallback logic generates 100 sentinel token IDs starting
     # from len(tokenizer).
@@ -98,7 +101,7 @@ def main():
     logger.info("Freezing the encoder parameters.")
     for param in model.get_encoder().parameters():
         param.requires_grad = False
-    
+
     # Create data collator
     logger.info("Creating UL2MoDCollator")
     data_collator = UL2MoDCollator(
@@ -113,8 +116,8 @@ def main():
     # Define training arguments
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        num_train_epochs=2,
-        learning_rate=1e-3,
+        num_train_epochs=3,
+        learning_rate=5e-5,
         logging_dir=f"{args.output_dir}/logs",
         logging_steps=1,
         per_device_train_batch_size=bs,

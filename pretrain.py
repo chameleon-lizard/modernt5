@@ -93,6 +93,11 @@ def main():
         model.resize_token_embeddings(required_model_vocab_size)
         # resize_token_embeddings also updates model.config.vocab_size.
         # If it didn't, we would need: model.config.vocab_size = required_model_vocab_size
+
+    # Freeze encoder parameters
+    logger.info("Freezing the encoder parameters.")
+    for param in model.get_encoder().parameters():
+        param.requires_grad = False
     
     # Create data collator
     logger.info("Creating UL2MoDCollator")

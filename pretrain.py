@@ -7,6 +7,7 @@ from transformers import (
     Trainer,
     AutoTokenizer,
     set_seed,
+    TrainerCallback,
 )
 
 import torch._dynamo
@@ -14,6 +15,21 @@ torch._dynamo.config.suppress_errors = True
 
 from modeling_modernt5 import ModernT5ForConditionalGeneration
 from collator import UL2MoDCollator
+
+
+class EncoderUnfreezeCallback(TrainerCallback):
+    """Callback to unfreeze encoder parameters after a specified number of epochs."""
+    
+    def __init__(self, unfreeze_epoch: int):
+        self.unfreeze_epoch = unfreeze_epoch
+        self.unfrozen = False
+    
+    def on_epoch_begin(self, args, state, control, model=None, **kwargs):
+        if state.epoch >= self.unfreeze_epoch and not self.unfrozen:
+            logging.getLogger(__name__).info(f"Unfreezing encoder parameters at epoch {state.epoch}")
+            for param in model.get_encoder().parameters():
+                param.requires_grad = True
+            self.unfrozen = True
 
 
 def parse_args():
@@ -30,8 +46,10 @@ def parse_args():
                         help="Batch size per GPU/TPU")
     parser.add_argument("--learning_rate", type=float, default=5e-4, 
                         help="Learning rate")
-    parser.add_argument("--num_train_epochs", type=int, default=3, 
+    parser.add_argument("--num_train_epochs", type=int, default=5, 
                         help="Number of training epochs")
+    parser.add_argument("--encoder_freeze_epochs", type=int, default=3,
+                        help="Number of epochs to keep encoder frozen")
     parser.add_argument("--seed", type=int, default=42, 
                         help="Random seed")
     parser.add_argument("--logging_steps", type=int, default=100, 
@@ -116,7 +134,7 @@ def main():
     # Define training arguments
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        num_train_epochs=3,
+        num_train_epochs=args.num_train_epochs,
         learning_rate=5e-5,
         logging_dir=f"{args.output_dir}/logs",
         logging_steps=1,
@@ -134,12 +152,16 @@ def main():
         bf16=True,  # Use mixed precision training if available
     )
     
+    # Create callback to unfreeze encoder after specified epochs
+    unfreeze_callback = EncoderUnfreezeCallback(unfreeze_epoch=args.encoder_freeze_epochs)
+    
     # Initialize trainer
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
         data_collator=data_collator,
+        callbacks=[unfreeze_callback],
     )
 
     # Train model

@@ -98,18 +98,18 @@ def main():
     logger.info("Creating UL2MoDCollator")
     data_collator = UL2MoDCollator(
         tokenizer=tokenizer,
-        max_seq_length=2048,
+        max_seq_length=1024,
     )
 
     effective_bs = 512
-    bs = 128
+    bs = 64
     grad_accum_steps = effective_bs // bs
     
     # Define training arguments
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        num_train_epochs=3,
-        learning_rate=1e-2,
+        num_train_epochs=2,
+        learning_rate=1e-3,
         logging_dir=f"{args.output_dir}/logs",
         logging_steps=1,
         per_device_train_batch_size=bs,
@@ -118,7 +118,7 @@ def main():
         save_total_limit=3,  # Only keep the 3 most recent checkpoints
         warmup_steps=1000,
         weight_decay=0.1,
-        max_grad_norm=1.0,
+        max_grad_norm=2.0,
         optim='adamw_torch_fused',
         lr_scheduler_type='cosine',
         remove_unused_columns=False,  # Required for custom collator

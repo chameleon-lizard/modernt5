@@ -1,5 +1,4 @@
 import os
-import logging
 import argparse
 from datasets import load_from_disk
 from transformers import (
@@ -15,40 +14,114 @@ torch._dynamo.config.suppress_errors = True
 
 from modeling_modernt5 import ModernT5ForConditionalGeneration
 from collator import UL2MoDCollator
+import re
+from collections import defaultdict
+from typing import List, Dict
 
 
 class EncoderUnfreezeCallback(TrainerCallback):
-    """Callback to unfreeze encoder parameters after a specified number of epochs."""
-    
-    def __init__(self, unfreeze_epoch: int):
-        self.unfreeze_epoch = unfreeze_epoch
-        self.unfrozen = False
-    
+    """
+    Gradually unfreeze the encoder:
+      • keep it frozen for `freeze_epochs`
+      • then unfreeze `layers_per_epoch` additional blocks every epoch
+      • option to unfreeze embeddings + final layer-norm immediately
+    """
+    def __init__(self, freeze_epochs=1, layers_per_epoch=1):
+        self.freeze_epochs = freeze_epochs
+        self.layers_per_epoch = layers_per_epoch
+
     def on_epoch_begin(self, args, state, control, model=None, **kwargs):
-        if state.epoch >= self.unfreeze_epoch and not self.unfrozen:
-            logging.getLogger(__name__).info(f"Unfreezing encoder parameters at epoch {state.epoch}")
-            for param in model.get_encoder().parameters():
+        current_epoch = int(state.epoch)           # robust against float rounding
+        if current_epoch < self.freeze_epochs:
+            return                                # still frozen
+
+        # How many encoder blocks should be *trainable* at this point?
+        n_blocks = len(model.get_encoder().block)
+        blocks_to_unfreeze = min(
+            n_blocks,
+            (current_epoch - self.freeze_epochs + 1) * self.layers_per_epoch,
+        )
+
+        # Unfreeze embeddings / LN immediately (optional)
+        for name, param in model.get_encoder().named_parameters():
+            if name.startswith(("embed_tokens", "final_layer_norm")):
                 param.requires_grad = True
-            self.unfrozen = True
+
+        # Unfreeze the last `blocks_to_unfreeze` blocks
+        for block in model.get_encoder().block[-blocks_to_unfreeze:]:
+            for param in block.parameters():
+                param.requires_grad = True
+
+
+def build_discriminative_param_groups(
+    model,
+    base_lr: float = 5e-4,
+    layer_decay: float = 0.8,
+    encoder_multiplier: float = 1.0,
+    decoder_multiplier: float = 1.0,
+    weight_decay: float = 0.01,
+) -> List[Dict]:
+    try:
+        n_enc_layers = len(model.get_encoder().block)
+    except AttributeError:
+        n_enc_layers = len(model.get_encoder().layers)
+
+    try:
+        n_dec_layers = len(model.get_decoder().block)
+    except AttributeError:
+        n_dec_layers = len(model.get_decoder().layers)
+
+    enc_pat = re.compile(r"encoder\.block\.(\d+)\.")
+    dec_pat = re.compile(r"decoder\.block\.(\d+)\.")
+
+    no_decay_keywords = {"bias", "LayerNorm.weight", "layer_norm.weight",
+                         "norm.weight", "embed_tokens.weight", "pos_emb"}
+
+    buckets: Dict[tuple, Dict] = defaultdict(lambda: {"params": []})
+
+    for name, param in model.named_parameters():
+        enc_match = enc_pat.search(name)
+        dec_match = dec_pat.search(name)
+
+        if enc_match:                               # ── encoder param ──
+            layer_idx = int(enc_match.group(1))
+            depth_from_top = n_enc_layers - layer_idx - 1
+            lr = (base_lr * encoder_multiplier *
+                  (layer_decay ** depth_from_top))
+        elif dec_match:                             # ── decoder param ──
+            layer_idx = int(dec_match.group(1))
+            depth_from_top = n_dec_layers - layer_idx - 1
+            lr = (base_lr * decoder_multiplier *
+                  (layer_decay ** depth_from_top))
+        else:                                       # embeddings, lm_head, etc.
+            # treat as “below” the last layer (smallest LR)
+            lr = (base_lr *
+                  (encoder_multiplier if name.startswith("encoder") else decoder_multiplier) *
+                  (layer_decay ** max(n_enc_layers, n_dec_layers)))
+        apply_wd = not any(nd in name for nd in no_decay_keywords)
+        wd = weight_decay if apply_wd else 0.0
+
+        buckets[(lr, wd)]["params"].append(param)
+        buckets[(lr, wd)]["lr"] = lr
+        buckets[(lr, wd)]["weight_decay"] = wd
+
+    return list(buckets.values())
+
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train ModernT5ForConditionalGeneration model")
-    parser.add_argument("--model_path", type=str, default="modernt5_tiny_frozen", 
+    parser.add_argument("--model_path", type=str, default="modernt5_from_rumodernbert", 
                         help="Path to the model checkpoint directory")
     parser.add_argument("--dataset_dir", type=str, default="final_pretrain_mix_tokenized", 
                         help="Path to the dataset directory")
     parser.add_argument("--output_dir", type=str, default="./results", 
                         help="Directory to save model checkpoints")
-    parser.add_argument("--max_seq_length", type=int, default=2048, 
-                        help="Maximum sequence length")
-    parser.add_argument("--per_device_train_batch_size", type=int, default=8, 
-                        help="Batch size per GPU/TPU")
-    parser.add_argument("--learning_rate", type=float, default=5e-4, 
+    parser.add_argument("--learning_rate", type=float, default=1e-3, 
                         help="Learning rate")
-    parser.add_argument("--num_train_epochs", type=int, default=5, 
+    parser.add_argument("--num_train_epochs", type=int, default=6, 
                         help="Number of training epochs")
-    parser.add_argument("--encoder_freeze_epochs", type=int, default=3,
+    parser.add_argument("--encoder_freeze_epochs", type=int, default=0,
                         help="Number of epochs to keep encoder frozen")
     parser.add_argument("--seed", type=int, default=42, 
                         help="Random seed")
@@ -69,14 +142,6 @@ def main():
     os.environ["WANDB_TAGS"] = "pretrain"
     os.environ["WANDB_WATCH"] = "gradients"
     
-    # Setup logging
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        level=logging.INFO,
-    )
-    logger = logging.getLogger(__name__)
-    
     # Set seed for reproducibility
     set_seed(args.seed)
     
@@ -84,17 +149,17 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Load dataset
-    logger.info(f"Loading dataset from {args.dataset_dir}")
+    print(f"Loading dataset from {args.dataset_dir}")
     dataset = load_from_disk(args.dataset_dir)
     
     # Load tokenizer and model
-    logger.info(f"Loading tokenizer and model from {args.model_path}")
+    print(f"Loading tokenizer and model from {args.model_path}")
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
 
     if tokenizer.eos_token_id is None:
         # BERT-style models often use sep_token as the eos token.
         # The decoder config in model.py also uses sep_token_id for eos_token_id.
-        logger.info("Tokenizer does not have an EOS token. Setting eos_token to sep_token.")
+        print("Tokenizer does not have an EOS token. Setting eos_token to sep_token.")
         tokenizer.eos_token = tokenizer.sep_token
     
     model = ModernT5ForConditionalGeneration.from_pretrained(args.model_path)
@@ -107,7 +172,7 @@ def main():
     required_model_vocab_size = tokenizer_vocab_size + num_collator_sentinels
 
     if model.config.vocab_size < required_model_vocab_size:
-        logger.info(
+        print(
             f"Resizing token embeddings from {model.config.vocab_size} to {required_model_vocab_size} "
             f"to accommodate collator's sentinel tokens."
         )
@@ -116,33 +181,61 @@ def main():
         # If it didn't, we would need: model.config.vocab_size = required_model_vocab_size
 
     # Freeze encoder parameters
-    logger.info("Freezing the encoder parameters.")
+    print("Freezing the encoder parameters.")
     for param in model.get_encoder().parameters():
         param.requires_grad = False
 
     # Create data collator
-    logger.info("Creating UL2MoDCollator")
+    print("Creating UL2MoDCollator")
     data_collator = UL2MoDCollator(
         tokenizer=tokenizer,
         max_seq_length=1024,
     )
 
     effective_bs = 512
-    bs = 64
+    bs = 256
     grad_accum_steps = effective_bs // bs
+
+    opt_groups = build_discriminative_param_groups(
+        model,
+        base_lr=args.learning_rate,
+        layer_decay=0.9,
+        encoder_multiplier=1.0,
+        decoder_multiplier=1.0,
+        weight_decay=0.1,
+    )
+
+    optimizer = torch.optim.AdamW(
+        opt_groups,
+        betas=(0.9, 0.98),
+        eps=1e-6,
+    )
+
+    # Re-use the same scheduler you would get from Trainer
+    scheduler = get_scheduler(
+        name=training_args.lr_scheduler_type,
+        optimizer=optimizer,
+        num_warmup_steps=training_args.warmup_steps,
+        num_training_steps=(
+            len(dataset) // (training_args.per_device_train_batch_size *
+                             training_args.gradient_accumulation_steps) *
+            training_args.num_train_epochs
+        ),
+    )
+
     
     # Define training arguments
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.num_train_epochs,
-        learning_rate=5e-5,
+        learning_rate=args.learning_rate,
         logging_dir=f"{args.output_dir}/logs",
         logging_steps=1,
         per_device_train_batch_size=bs,
         gradient_accumulation_steps=grad_accum_steps,
         save_steps=250,
         save_total_limit=3,  # Only keep the 3 most recent checkpoints
-        warmup_steps=1000,
+        warmup_steps=600,
         weight_decay=0.1,
         max_grad_norm=2.0,
         optim='adamw_torch_fused',
@@ -162,18 +255,19 @@ def main():
         train_dataset=dataset,
         data_collator=data_collator,
         callbacks=[unfreeze_callback],
+        optimizers=(optimizer, scheduler),
     )
 
     # Train model
-    logger.info("Starting training")
+    print("Starting training")
     trainer.train()
     
     # Save final model and tokenizer
-    logger.info(f"Saving final model to {args.output_dir}")
+    print(f"Saving final model to {args.output_dir}")
     trainer.save_model(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
     
-    logger.info("Training completed successfully")
+    print("Training completed successfully")
 
 if __name__ == "__main__":
     main()

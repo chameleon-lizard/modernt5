@@ -22,35 +22,36 @@ from typing import List, Dict
 class EncoderUnfreezeCallback(TrainerCallback):
     """
     Gradually unfreeze the encoder:
-      • keep it frozen for `freeze_epochs`
-      • then unfreeze `layers_per_epoch` additional blocks every epoch
-      • option to unfreeze embeddings + final layer-norm immediately
+      • start unfreezing immediately from epoch 0
+      • unfreeze everything after `n_warmup_epochs` epochs
     """
-    def __init__(self, freeze_epochs=1, layers_per_epoch=1):
-        self.freeze_epochs = freeze_epochs
-        self.layers_per_epoch = layers_per_epoch
+    def __init__(self, n_warmup_epochs=3):
+        self.n_warmup_epochs = n_warmup_epochs
 
     def on_epoch_begin(self, args, state, control, model=None, **kwargs):
         current_epoch = int(state.epoch)           # robust against float rounding
-        if current_epoch < self.freeze_epochs:
-            return                                # still frozen
-
-        # How many encoder blocks should be *trainable* at this point?
-        n_blocks = len(model.get_encoder().block)
-        blocks_to_unfreeze = min(
-            n_blocks,
-            (current_epoch - self.freeze_epochs + 1) * self.layers_per_epoch,
-        )
-
-        # Unfreeze embeddings / LN immediately (optional)
-        for name, param in model.get_encoder().named_parameters():
-            if name.startswith(("embed_tokens", "final_layer_norm")):
+        
+        if current_epoch >= self.n_warmup_epochs:
+            # Unfreeze everything after warmup epochs
+            for param in model.get_encoder().parameters():
                 param.requires_grad = True
+        else:
+            # Gradually unfreeze during warmup period
+            n_blocks = len(model.get_encoder().block)
+            
+            # Calculate how many blocks to unfreeze based on current epoch
+            blocks_per_epoch = n_blocks / self.n_warmup_epochs
+            blocks_to_unfreeze = min(n_blocks, int((current_epoch + 1) * blocks_per_epoch))
+            
+            # Unfreeze embeddings and final layer norm immediately
+            for name, param in model.get_encoder().named_parameters():
+                if name.startswith(("embed_tokens", "final_layer_norm")):
+                    param.requires_grad = True
 
-        # Unfreeze the last `blocks_to_unfreeze` blocks
-        for block in model.get_encoder().block[-blocks_to_unfreeze:]:
-            for param in block.parameters():
-                param.requires_grad = True
+            # Unfreeze the first `blocks_to_unfreeze` blocks
+            for i in range(blocks_to_unfreeze):
+                for param in model.get_encoder().block[i].parameters():
+                    param.requires_grad = True
 
 
 def build_discriminative_param_groups(

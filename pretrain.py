@@ -20,6 +20,24 @@ from collections import defaultdict
 from typing import List, Dict
 
 
+class UnifyLearningRateCallback(TrainerCallback):
+    """Callback to unify all learning rates to base_lr after a certain number of steps."""
+    
+    def __init__(self, unify_at_step: int, base_lr: float):
+        self.unify_at_step = unify_at_step
+        self.base_lr = base_lr
+        self.unified = False
+    
+    def on_step_begin(self, args, state, control, **kwargs):
+        if state.global_step == self.unify_at_step and not self.unified:
+            optimizer = kwargs.get('optimizer')
+            if optimizer is not None:
+                print(f"Step {state.global_step}: Unifying all learning rates to {self.base_lr}")
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = self.base_lr
+                self.unified = True
+
+
 def build_discriminative_param_groups(
     model,
     base_lr: float = 5e-4,

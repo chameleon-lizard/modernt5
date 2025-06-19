@@ -7,6 +7,7 @@ from transformers import (
     AutoTokenizer,
     set_seed,
     TrainerCallback,
+    get_scheduler,
 )
 
 import torch._dynamo
@@ -206,26 +207,7 @@ def main():
         weight_decay=0.1,
     )
 
-    optimizer = torch.optim.AdamW(
-        opt_groups,
-        betas=(0.9, 0.98),
-        eps=1e-6,
-    )
-
-    # Re-use the same scheduler you would get from Trainer
-    scheduler = get_scheduler(
-        name=training_args.lr_scheduler_type,
-        optimizer=optimizer,
-        num_warmup_steps=training_args.warmup_steps,
-        num_training_steps=(
-            len(dataset) // (training_args.per_device_train_batch_size *
-                             training_args.gradient_accumulation_steps) *
-            training_args.num_train_epochs
-        ),
-    )
-
-    
-    # Define training arguments
+    # Define training arguments first
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.num_train_epochs,
@@ -245,9 +227,27 @@ def main():
         report_to="wandb",
         bf16=True,  # Use mixed precision training if available
     )
+
+    optimizer = torch.optim.AdamW(
+        opt_groups,
+        betas=(0.9, 0.98),
+        eps=1e-6,
+    )
+
+    # Re-use the same scheduler you would get from Trainer
+    scheduler = get_scheduler(
+        name=training_args.lr_scheduler_type,
+        optimizer=optimizer,
+        num_warmup_steps=training_args.warmup_steps,
+        num_training_steps=(
+            len(dataset) // (training_args.per_device_train_batch_size *
+                             training_args.gradient_accumulation_steps) *
+            training_args.num_train_epochs
+        ),
+    )
     
     # Create callback to unfreeze encoder after specified epochs
-    unfreeze_callback = EncoderUnfreezeCallback(unfreeze_epoch=args.encoder_freeze_epochs)
+    unfreeze_callback = EncoderUnfreezeCallback(n_warmup_epochs=args.encoder_freeze_epochs)
     
     # Initialize trainer
     trainer = Trainer(

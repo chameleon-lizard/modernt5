@@ -203,6 +203,12 @@ def main():
         ),
     )
     
+    # Create callback to unify learning rates after 500 steps
+    unify_lr_callback = UnifyLearningRateCallback(
+        unify_at_step=500,
+        base_lr=args.learning_rate
+    )
+    
     # Initialize trainer
     trainer = Trainer(
         model=model,
@@ -210,6 +216,7 @@ def main():
         train_dataset=dataset,
         data_collator=data_collator,
         optimizers=(optimizer, scheduler),
+        callbacks=[unify_lr_callback],
     )
 
     # Train model

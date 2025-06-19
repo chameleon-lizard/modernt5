@@ -30,9 +30,11 @@ class UnifyLearningRateCallback(TrainerCallback):
         self.end_step = start_step + transition_steps
         self.initial_lrs = None
         self.transition_started = False
+        self.unified = False
     
     def on_step_begin(self, args, state, control, **kwargs):
         optimizer = kwargs.get('optimizer')
+        lr_scheduler = kwargs.get('lr_scheduler')
         if optimizer is None:
             return
             
@@ -45,18 +47,30 @@ class UnifyLearningRateCallback(TrainerCallback):
             print(f"Step {current_step}: Starting gradual LR unification over {self.transition_steps} steps")
         
         # Gradually adjust learning rates during transition period
-        if self.transition_started and current_step <= self.end_step:
+        if self.transition_started and current_step <= self.end_step and not self.unified:
             progress = (current_step - self.start_step) / self.transition_steps
             progress = min(progress, 1.0)  # Clamp to [0, 1]
             
+            # Get the current scheduled learning rate for the base_lr
+            if lr_scheduler is not None:
+                # The scheduler's get_last_lr() returns the current LR for each param group
+                scheduled_base_lr = lr_scheduler.get_last_lr()[0] if lr_scheduler.get_last_lr() else self.base_lr
+            else:
+                scheduled_base_lr = self.base_lr
+            
             for i, param_group in enumerate(optimizer.param_groups):
                 initial_lr = self.initial_lrs[i]
-                # Linear interpolation from initial_lr to base_lr
-                new_lr = initial_lr + progress * (self.base_lr - initial_lr)
+                # Linear interpolation from initial_lr to scheduled_base_lr
+                new_lr = initial_lr + progress * (scheduled_base_lr - initial_lr)
                 param_group['lr'] = new_lr
             
             if current_step == self.end_step:
-                print(f"Step {current_step}: LR unification completed. All learning rates now: {self.base_lr}")
+                # After unification, set all param groups to use the same base learning rate
+                # so the scheduler will apply the same scaling to all of them
+                for param_group in optimizer.param_groups:
+                    param_group['initial_lr'] = self.base_lr
+                self.unified = True
+                print(f"Step {current_step}: LR unification completed. All learning rates unified to scheduler-adjusted rate.")
 
 
 def build_discriminative_param_groups(

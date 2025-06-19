@@ -242,9 +242,9 @@ def main():
         ),
     )
     
-    # Create callback to gradually unify learning rates starting at step 500 over 100 steps
+    # Create callback to gradually unify learning rates starting at step 300 over 100 steps
     unify_lr_callback = UnifyLearningRateCallback(
-        start_step=500,
+        start_step=300,
         base_lr=args.learning_rate,
         transition_steps=100
     )

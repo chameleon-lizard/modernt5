@@ -20,41 +20,6 @@ from collections import defaultdict
 from typing import List, Dict
 
 
-class EncoderUnfreezeCallback(TrainerCallback):
-    """
-    Gradually unfreeze the encoder:
-      • start unfreezing immediately from epoch 0
-      • unfreeze everything after `n_warmup_epochs` epochs
-    """
-    def __init__(self, n_warmup_epochs=3):
-        self.n_warmup_epochs = n_warmup_epochs
-
-    def on_epoch_begin(self, args, state, control, model=None, **kwargs):
-        current_epoch = int(state.epoch)           # robust against float rounding
-        
-        if current_epoch >= self.n_warmup_epochs:
-            # Unfreeze everything after warmup epochs
-            for param in model.get_encoder().parameters():
-                param.requires_grad = True
-        else:
-            # Gradually unfreeze during warmup period
-            n_blocks = len(model.get_encoder().block)
-            
-            # Calculate how many blocks to unfreeze based on current epoch
-            blocks_per_epoch = n_blocks / self.n_warmup_epochs
-            blocks_to_unfreeze = min(n_blocks, int((current_epoch + 1) * blocks_per_epoch))
-            
-            # Unfreeze embeddings and final layer norm immediately
-            for name, param in model.get_encoder().named_parameters():
-                if name.startswith(("embed_tokens", "final_layer_norm")):
-                    param.requires_grad = True
-
-            # Unfreeze the first `blocks_to_unfreeze` blocks
-            for i in range(blocks_to_unfreeze):
-                for param in model.get_encoder().block[i].parameters():
-                    param.requires_grad = True
-
-
 def build_discriminative_param_groups(
     model,
     base_lr: float = 5e-4,
@@ -90,11 +55,8 @@ def build_discriminative_param_groups(
             depth_from_top = n_enc_layers - layer_idx - 1
             lr = (base_lr * encoder_multiplier *
                   (layer_decay ** depth_from_top))
-        elif dec_match:                             # ── decoder param ──
-            layer_idx = int(dec_match.group(1))
-            depth_from_top = n_dec_layers - layer_idx - 1
-            lr = (base_lr * decoder_multiplier *
-                  (layer_decay ** depth_from_top))
+        elif dec_match:
+            continue
         else:                                       # embeddings, lm_head, etc.
             # treat as “below” the last layer (smallest LR)
             lr = (base_lr *
@@ -182,11 +144,6 @@ def main():
         # resize_token_embeddings also updates model.config.vocab_size.
         # If it didn't, we would need: model.config.vocab_size = required_model_vocab_size
 
-    # Freeze encoder parameters
-    print("Freezing the encoder parameters.")
-    for param in model.get_encoder().parameters():
-        param.requires_grad = False
-
     # Create data collator
     print("Creating UL2MoDCollator")
     data_collator = UL2MoDCollator(
@@ -195,7 +152,7 @@ def main():
     )
 
     effective_bs = 512
-    bs = 256
+    bs = 128
     grad_accum_steps = effective_bs // bs
 
     opt_groups = build_discriminative_param_groups(
@@ -220,7 +177,7 @@ def main():
         save_total_limit=3,  # Only keep the 3 most recent checkpoints
         warmup_steps=600,
         weight_decay=0.1,
-        max_grad_norm=2.0,
+        max_grad_norm=1.0,
         optim='adamw_torch_fused',
         lr_scheduler_type='cosine',
         remove_unused_columns=False,  # Required for custom collator
@@ -246,16 +203,12 @@ def main():
         ),
     )
     
-    # Create callback to unfreeze encoder after specified epochs
-    unfreeze_callback = EncoderUnfreezeCallback(n_warmup_epochs=args.encoder_freeze_epochs)
-    
     # Initialize trainer
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
         data_collator=data_collator,
-        callbacks=[unfreeze_callback],
         optimizers=(optimizer, scheduler),
     )
 

@@ -21,21 +21,42 @@ from typing import List, Dict
 
 
 class UnifyLearningRateCallback(TrainerCallback):
-    """Callback to unify all learning rates to base_lr after a certain number of steps."""
+    """Callback to gradually unify all learning rates to base_lr over a period of steps."""
     
-    def __init__(self, unify_at_step: int, base_lr: float):
-        self.unify_at_step = unify_at_step
+    def __init__(self, start_step: int, base_lr: float, transition_steps: int = 100):
+        self.start_step = start_step
         self.base_lr = base_lr
-        self.unified = False
+        self.transition_steps = transition_steps
+        self.end_step = start_step + transition_steps
+        self.initial_lrs = None
+        self.transition_started = False
     
     def on_step_begin(self, args, state, control, **kwargs):
-        if state.global_step == self.unify_at_step and not self.unified:
-            optimizer = kwargs.get('optimizer')
-            if optimizer is not None:
-                print(f"Step {state.global_step}: Unifying all learning rates to {self.base_lr}")
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = self.base_lr
-                self.unified = True
+        optimizer = kwargs.get('optimizer')
+        if optimizer is None:
+            return
+            
+        current_step = state.global_step
+        
+        # Store initial learning rates when transition starts
+        if current_step == self.start_step and not self.transition_started:
+            self.initial_lrs = [param_group['lr'] for param_group in optimizer.param_groups]
+            self.transition_started = True
+            print(f"Step {current_step}: Starting gradual LR unification over {self.transition_steps} steps")
+        
+        # Gradually adjust learning rates during transition period
+        if self.transition_started and current_step <= self.end_step:
+            progress = (current_step - self.start_step) / self.transition_steps
+            progress = min(progress, 1.0)  # Clamp to [0, 1]
+            
+            for i, param_group in enumerate(optimizer.param_groups):
+                initial_lr = self.initial_lrs[i]
+                # Linear interpolation from initial_lr to base_lr
+                new_lr = initial_lr + progress * (self.base_lr - initial_lr)
+                param_group['lr'] = new_lr
+            
+            if current_step == self.end_step:
+                print(f"Step {current_step}: LR unification completed. All learning rates now: {self.base_lr}")
 
 
 def build_discriminative_param_groups(
@@ -221,10 +242,11 @@ def main():
         ),
     )
     
-    # Create callback to unify learning rates after 500 steps
+    # Create callback to gradually unify learning rates starting at step 500 over 100 steps
     unify_lr_callback = UnifyLearningRateCallback(
-        unify_at_step=500,
-        base_lr=args.learning_rate
+        start_step=500,
+        base_lr=args.learning_rate,
+        transition_steps=100
     )
     
     # Initialize trainer

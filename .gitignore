@@ -1,1 +1,9 @@
 .aider*
+wandb/*
+.ropeproject/*
+__pycache__/*
+cache/*
+results/
+modernt5_*
+cache/*
+final_pretrain_mix_tokenized

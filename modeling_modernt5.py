@@ -1,4 +1,3 @@
-import math
 from typing import Dict, Optional, Tuple, Union, List
 
 import torch
@@ -8,14 +7,12 @@ from torch.nn import CrossEntropyLoss
 
 from transformers.generation import GenerationMixin # Import GenerationMixin
 
-from transformers.activations import ACT2FN
 from transformers.modeling_outputs import (
     BaseModelOutput,
     BaseModelOutputWithPastAndCrossAttentions,
     Seq2SeqLMOutput,
     Seq2SeqModelOutput,
 )
-from transformers.modeling_utils import PreTrainedModel
 from transformers.utils import (
     add_start_docstrings,
     # add_start_docstrings_to_model_forward,
@@ -29,7 +26,6 @@ from transformers.models.modernbert.modeling_modernbert import (
     ModernBertConfig,
     ModernBertModel, # Encoder
     ModernBertPreTrainedModel, # Base for our ModernT5PreTrainedModel
-    ModernBertEmbeddings, # Used as a reference for embedding structure
     ModernBertMLP, # Used in decoder layers
     ModernBertRotaryEmbedding, # RoPE implementation for padded attention path
     apply_rotary_pos_emb,
@@ -155,7 +151,7 @@ class ModernT5Attention(nn.Module):
 
             # Decoder local attention RoPE config (if applicable, similar to ModernBertAttention)
             # Not implementing sliding window masking here, just RoPE param adjustment. Causal mask is primary.
-            if config.decoder_local_attention > 0 and \
+            if config.decoder_local_attention is not None and config.decoder_local_attention > 0 and \
                (layer_id % config.decoder_global_attn_every_n_layers != 0):
                 if config.decoder_local_rope_theta is not None:
                     rope_theta = config.decoder_local_rope_theta
@@ -258,12 +254,12 @@ class ModernT5Layer(nn.Module):
         self.self_attention = ModernT5Attention(config, is_decoder=True, layer_id=layer_id, is_self_attn=True)
 
         self.cross_attn_layer_norm = nn.RMSNorm(
-            config.hidden_size, eps=config.decoder_norm_eps, 
+            config.hidden_size, eps=config.decoder_norm_eps,
         )
         self.cross_attention = ModernT5Attention(config, is_decoder=True, layer_id=layer_id, is_self_attn=False)
 
         self.mlp_layer_norm = nn.RMSNorm(
-            config.hidden_size, eps=config.decoder_norm_eps, 
+            config.hidden_size, eps=config.decoder_norm_eps,
         )
         # Create a temporary ModernBertConfig for the MLP, using decoder_intermediate_size
         mlp_config = ModernBertConfig(
@@ -360,7 +356,7 @@ class ModernT5Stack(ModernT5PreTrainedModel): # Decoder stack
             [ModernT5Layer(config, layer_id=i) for i in range(config.num_decoder_layers)]
         )
         self.final_layer_norm = nn.RMSNorm(
-            config.hidden_size, eps=config.decoder_norm_eps, 
+            config.hidden_size, eps=config.decoder_norm_eps,
         )
         self.gradient_checkpointing = False # Default, can be enabled
         self.post_init()
@@ -428,7 +424,7 @@ class ModernT5Stack(ModernT5PreTrainedModel): # Decoder stack
         self_attn_mask = self._prepare_decoder_attention_mask(
             attention_mask, input_shape, inputs_embeds, past_key_values_length
         )
-        
+
         cross_attn_mask = None
         if encoder_hidden_states is not None and encoder_attention_mask is not None:
             q_len = input_shape[-1]
@@ -462,7 +458,7 @@ class ModernT5Stack(ModernT5PreTrainedModel): # Decoder stack
                 all_self_attns += (layer_outputs[1][0],) # (self_attn_weights, cross_attn_weights)
                 if encoder_hidden_states is not None:
                     all_cross_attns += (layer_outputs[1][1],)
-        
+
         next_cache = tuple(next_decoder_cache) if use_cache else None
         hidden_states = self.final_layer_norm(hidden_states)
         if output_hidden_states:
@@ -659,7 +655,7 @@ class ModernT5ForConditionalGeneration(ModernT5PreTrainedModel, GenerationMixin)
             decoder_input_ids = model_kwargs.pop("decoder_input_ids")
         else:
             decoder_input_ids = torch.ones((batch_size, 1), dtype=torch.long, device=device) * _bos_token_id
-        
+
         # For RoPE, decoder_position_ids must be initialized for the first token (usually 0)
         if "decoder_position_ids" not in model_kwargs:
              model_kwargs["decoder_position_ids"] = torch.zeros_like(decoder_input_ids, dtype=torch.long)
@@ -742,7 +738,7 @@ class ModernT5ForConditionalGeneration(ModernT5PreTrainedModel, GenerationMixin)
             )
             if decoder_position_ids is None: # For the first token, position is 0
                 decoder_position_ids = torch.zeros_like(decoder_input_ids, dtype=torch.long, device=current_device)
-        
+
         outputs = self.model(
             input_ids=input_ids, attention_mask=attention_mask, position_ids=position_ids, inputs_embeds=inputs_embeds,
             decoder_input_ids=decoder_input_ids, decoder_attention_mask=decoder_attention_mask,
@@ -752,7 +748,7 @@ class ModernT5ForConditionalGeneration(ModernT5PreTrainedModel, GenerationMixin)
             output_hidden_states=output_hidden_states, return_dict=return_dict,
         )
         sequence_output = outputs[0] # Decoder last hidden state
-        
+
         if self.config.tie_word_embeddings and hasattr(self.lm_head, 'weight') and self.lm_head.weight.data.device != sequence_output.device:
             self.lm_head = self.lm_head.to(sequence_output.device)
         lm_logits = self.lm_head(sequence_output)
@@ -825,9 +821,9 @@ if __name__ == '__main__':
     # ModernBertModel is imported at the top of the file, so it's available here.
 
     # --- 1. Load Pretrained Encoder and Tokenizer ---
-    encoder_name = "deepvk/RuModernBERT-small"
+    encoder_name = "deepvk/USER2-small"
     print(f"Loading pretrained encoder and tokenizer from: {encoder_name}")
-    
+
     # Load the encoder model. This requires the ModernBertModel class to be available.
     encoder = ModernBertModel.from_pretrained(encoder_name)
     tokenizer = AutoTokenizer.from_pretrained(encoder_name)
@@ -836,13 +832,13 @@ if __name__ == '__main__':
     if tokenizer.bos_token is None:
         print("Tokenizer does not have a BOS token. Setting bos_token to cls_token.")
         tokenizer.bos_token = tokenizer.cls_token
-    
+
     # --- 2. Configure the Encoder-Decoder Model ---
     # We will create a ModernT5 model. The encoder part will be replaced by our loaded one.
     # The decoder can be configured symmetrically to the encoder.
     print("Configuring ModernT5 model...")
     encoder_config = encoder.config
-    
+
     # Create a ModernT5Config using the encoder's config. It will automatically
     # copy encoder properties to the decoder if decoder-specific ones are not provided.
     encoder_config_dict = encoder_config.to_dict()
@@ -852,50 +848,51 @@ if __name__ == '__main__':
     encoder_config_dict['is_encoder_decoder'] = True
     config = ModernT5Config(
         **encoder_config_dict,
+        num_decoder_layers=24,
     )
-    
+
     # --- 3. Initialize the Model and Set Pretrained Encoder ---
     print("Initializing ModernT5ForConditionalGeneration with random weights...")
     model = ModernT5ForConditionalGeneration(config)
-    
+
     print(f"Replacing encoder with pretrained '{encoder_name}'...")
     # The encoder is part of the `model` attribute of `ModernT5ForConditionalGeneration`.
     model.model.encoder = encoder
-    
+
     print("Tying word embeddings between encoder, decoder, and LM head...")
     # Ensure the embeddings are shared across the new encoder, the decoder, and the LM head.
     # We get the embeddings from the new encoder and set them for the whole model.
     model.set_input_embeddings(model.get_encoder().get_input_embeddings())
-    
+
     # --- 4. Final Steps (Verification, Saving) ---
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
     print(f"Model moved to {device.upper()}")
-    
+
     # Print parameter count
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Number of trainable parameters: {num_params / 1e6:.2f} M")
-    
+
     # Save the composed model and the tokenizer
     save_directory = "./modernt5_from_rumodernbert"
     print(f"Saving model and tokenizer to {save_directory}...")
     model.save_pretrained(save_directory)
     tokenizer.save_pretrained(save_directory)
     print("Save complete.")
-    
+
     # --- 5. Load and Test ---
     print(f"\nLoading model from {save_directory}...")
     loaded_model = ModernT5ForConditionalGeneration.from_pretrained(save_directory)
     loaded_model.to(device)
     print("Model loaded successfully from checkpoint.")
-    
+
     # Test with a dummy forward pass
     print("Performing a dummy forward pass...")
     dummy_input_ids = torch.randint(0, config.vocab_size, (2, 16)).to(device)
     dummy_labels = torch.randint(0, config.vocab_size, (2, 10)).to(device)
     dummy_output = loaded_model(input_ids=dummy_input_ids, labels=dummy_labels)
     print(f"Dummy forward pass successful. Loss: {dummy_output.loss.item():.4f}")
-    
+
     # Test generation
     print("\nPerforming a dummy generation...")
     # Use the tokenizer to prepare input
@@ -905,6 +902,6 @@ if __name__ == '__main__':
     # Generate output
     generated_ids = loaded_model.generate(**inputs, max_length=50)
     decoded_text = tokenizer.decode(generated_ids[0], skip_special_tokens=True)
-    
+
     print(f"Input: '{prompt}'")
     print(f"Generated output: '{decoded_text}'")

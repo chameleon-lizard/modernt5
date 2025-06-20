@@ -20,131 +20,25 @@ from collections import defaultdict
 from typing import List, Dict
 
 
-class UnifyLearningRateCallback(TrainerCallback):
-    """Callback to gradually unify all learning rates to base_lr over a period of steps."""
-    
-    def __init__(self, start_step: int, base_lr: float, transition_steps: int = 100):
-        self.start_step = start_step
-        self.base_lr = base_lr
-        self.transition_steps = transition_steps
-        self.end_step = start_step + transition_steps
-        self.initial_lrs = None
-        self.transition_started = False
-        self.unified = False
-    
-    def on_step_begin(self, args, state, control, **kwargs):
-        optimizer = kwargs.get('optimizer')
-        lr_scheduler = kwargs.get('lr_scheduler')
-        if optimizer is None:
-            return
-            
-        current_step = state.global_step
-        
-        # Store initial learning rates when transition starts
-        if current_step == self.start_step and not self.transition_started:
-            self.initial_lrs = [param_group['lr'] for param_group in optimizer.param_groups]
-            self.transition_started = True
-            print(f"Step {current_step}: Starting gradual LR unification over {self.transition_steps} steps")
-        
-        # Gradually adjust learning rates during transition period
-        if self.transition_started and current_step <= self.end_step and not self.unified:
-            progress = (current_step - self.start_step) / self.transition_steps
-            progress = min(progress, 1.0)  # Clamp to [0, 1]
-            
-            # Get the current scheduled learning rate for the base_lr
-            if lr_scheduler is not None:
-                # The scheduler's get_last_lr() returns the current LR for each param group
-                scheduled_base_lr = lr_scheduler.get_last_lr()[0] if lr_scheduler.get_last_lr() else self.base_lr
-            else:
-                scheduled_base_lr = self.base_lr
-            
-            for i, param_group in enumerate(optimizer.param_groups):
-                initial_lr = self.initial_lrs[i]
-                # Linear interpolation from initial_lr to scheduled_base_lr
-                new_lr = initial_lr + progress * (scheduled_base_lr - initial_lr)
-                param_group['lr'] = new_lr
-            
-            if current_step == self.end_step:
-                # After unification, set all param groups to use the same base learning rate
-                # so the scheduler will apply the same scaling to all of them
-                for param_group in optimizer.param_groups:
-                    param_group['initial_lr'] = self.base_lr
-                self.unified = True
-                print(f"Step {current_step}: LR unification completed. All learning rates unified to scheduler-adjusted rate.")
-
-
-def build_discriminative_param_groups(
-    model,
-    base_lr: float = 5e-4,
-    layer_decay: float = 0.8,
-    encoder_multiplier: float = 1.0,
-    decoder_multiplier: float = 1.0,
-    weight_decay: float = 0.01,
-) -> List[Dict]:
-    try:
-        n_enc_layers = len(model.get_encoder().block)
-    except AttributeError:
-        n_enc_layers = len(model.get_encoder().layers)
-
-    try:
-        n_dec_layers = len(model.get_decoder().block)
-    except AttributeError:
-        n_dec_layers = len(model.get_decoder().layers)
-
-    enc_pat = re.compile(r"encoder\.block\.(\d+)\.")
-    dec_pat = re.compile(r"decoder\.block\.(\d+)\.")
-
-    no_decay_keywords = {"bias", "LayerNorm.weight", "layer_norm.weight",
-                         "norm.weight", "embed_tokens.weight", "pos_emb"}
-
-    buckets: Dict[tuple, Dict] = defaultdict(lambda: {"params": []})
-
-    for name, param in model.named_parameters():
-        enc_match = enc_pat.search(name)
-        dec_match = dec_pat.search(name)
-
-        if enc_match:                               # ── encoder param ──
-            layer_idx = int(enc_match.group(1))
-            depth_from_top = n_enc_layers - layer_idx - 1
-            lr = (base_lr * encoder_multiplier *
-                  (layer_decay ** depth_from_top))
-        elif dec_match:
-            continue
-        else:                                       # embeddings, lm_head, etc.
-            # treat as “below” the last layer (smallest LR)
-            lr = (base_lr *
-                  (encoder_multiplier if name.startswith("encoder") else decoder_multiplier) *
-                  (layer_decay ** max(n_enc_layers, n_dec_layers)))
-        apply_wd = not any(nd in name for nd in no_decay_keywords)
-        wd = weight_decay if apply_wd else 0.0
-
-        buckets[(lr, wd)]["params"].append(param)
-        buckets[(lr, wd)]["lr"] = lr
-        buckets[(lr, wd)]["weight_decay"] = wd
-
-    return list(buckets.values())
-
-
-
 def parse_args():
     parser = argparse.ArgumentParser(description="Train ModernT5ForConditionalGeneration model")
-    parser.add_argument("--model_path", type=str, default="modernt5_from_rumodernbert", 
+    parser.add_argument("--model_path", type=str, default="modernt5_from_rumodernbert",
                         help="Path to the model checkpoint directory")
-    parser.add_argument("--dataset_dir", type=str, default="final_pretrain_mix_tokenized", 
+    parser.add_argument("--dataset_dir", type=str, default="final_pretrain_mix_tokenized",
                         help="Path to the dataset directory")
-    parser.add_argument("--output_dir", type=str, default="./results", 
+    parser.add_argument("--output_dir", type=str, default="./results",
                         help="Directory to save model checkpoints")
-    parser.add_argument("--learning_rate", type=float, default=1e-3, 
+    parser.add_argument("--learning_rate", type=float, default=1e-3,
                         help="Learning rate")
-    parser.add_argument("--num_train_epochs", type=int, default=6, 
+    parser.add_argument("--num_train_epochs", type=int, default=6,
                         help="Number of training epochs")
     parser.add_argument("--encoder_freeze_epochs", type=int, default=0,
                         help="Number of epochs to keep encoder frozen")
-    parser.add_argument("--seed", type=int, default=42, 
+    parser.add_argument("--seed", type=int, default=42,
                         help="Random seed")
-    parser.add_argument("--logging_steps", type=int, default=100, 
+    parser.add_argument("--logging_steps", type=int, default=100,
                         help="Log every X steps")
-    parser.add_argument("--save_steps", type=int, default=1000, 
+    parser.add_argument("--save_steps", type=int, default=1000,
                         help="Save checkpoint every X steps")
     return parser.parse_args()
 
@@ -158,17 +52,17 @@ def main():
     os.environ["WANDB_RUN_NAME"] = "modernt5_pretrain_test_lr"
     os.environ["WANDB_TAGS"] = "pretrain"
     os.environ["WANDB_WATCH"] = "gradients"
-    
+
     # Set seed for reproducibility
     set_seed(args.seed)
-    
+
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
-    
+
     # Load dataset
     print(f"Loading dataset from {args.dataset_dir}")
     dataset = load_from_disk(args.dataset_dir)
-    
+
     # Load tokenizer and model
     print(f"Loading tokenizer and model from {args.model_path}")
     tokenizer = AutoTokenizer.from_pretrained(args.model_path)
@@ -178,9 +72,9 @@ def main():
         # The decoder config in model.py also uses sep_token_id for eos_token_id.
         print("Tokenizer does not have an EOS token. Setting eos_token to sep_token.")
         tokenizer.eos_token = tokenizer.sep_token
-    
+
     model = ModernT5ForConditionalGeneration.from_pretrained(args.model_path)
-    
+
     # Ensure model vocab size is adequate for tokenizer + collator-generated sentinels.
     # The UL2MoDCollator's fallback logic generates 100 sentinel token IDs starting
     # from len(tokenizer).
@@ -208,15 +102,6 @@ def main():
     bs = 128
     grad_accum_steps = effective_bs // bs
 
-    opt_groups = build_discriminative_param_groups(
-        model,
-        base_lr=args.learning_rate,
-        layer_decay=0.9,
-        encoder_multiplier=1.0,
-        decoder_multiplier=1.0,
-        weight_decay=0.1,
-    )
-
     # Define training arguments first
     training_args = TrainingArguments(
         output_dir=args.output_dir,
@@ -238,50 +123,23 @@ def main():
         bf16=True,  # Use mixed precision training if available
     )
 
-    optimizer = torch.optim.AdamW(
-        opt_groups,
-        betas=(0.9, 0.98),
-        eps=1e-6,
-    )
-
-    # Re-use the same scheduler you would get from Trainer
-    scheduler = get_scheduler(
-        name=training_args.lr_scheduler_type,
-        optimizer=optimizer,
-        num_warmup_steps=training_args.warmup_steps,
-        num_training_steps=(
-            len(dataset) // (training_args.per_device_train_batch_size *
-                             training_args.gradient_accumulation_steps) *
-            training_args.num_train_epochs
-        ),
-    )
-    
-    # Create callback to gradually unify learning rates starting at step 300 over 100 steps
-    unify_lr_callback = UnifyLearningRateCallback(
-        start_step=300,
-        base_lr=args.learning_rate,
-        transition_steps=100
-    )
-    
     # Initialize trainer
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
         data_collator=data_collator,
-        optimizers=(optimizer, scheduler),
-        callbacks=[unify_lr_callback],
     )
 
     # Train model
     print("Starting training")
     trainer.train()
-    
+
     # Save final model and tokenizer
     print(f"Saving final model to {args.output_dir}")
     trainer.save_model(args.output_dir)
     tokenizer.save_pretrained(args.output_dir)
-    
+
     print("Training completed successfully")
 
 if __name__ == "__main__":

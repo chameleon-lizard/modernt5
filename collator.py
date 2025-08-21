@@ -118,7 +118,7 @@ class UL2MoDCollator:
             if current_labels:
                 final_labels = current_labels + [self.eos_token_id]
             else:
-                final_labels = [self.eos_token_id]
+                final_labels = []
 
             attention_mask = [1] * len(final_input_ids)
 

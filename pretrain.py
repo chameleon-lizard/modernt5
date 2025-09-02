@@ -73,23 +73,29 @@ def main():
         print("Tokenizer does not have an EOS token. Setting eos_token to sep_token.")
         tokenizer.eos_token = tokenizer.sep_token
 
+    # Ensure tokenizer has sentinel tokens used for UL2-style span corruption.
+    required_sentinels = 100
+    existing_special_tokens = tokenizer.additional_special_tokens or []
+    existing_sentinels = [
+        tok for tok in existing_special_tokens
+        if "extra_id" in tok or "sentinel" in tok.lower()
+    ]
+    if len(existing_sentinels) < required_sentinels:
+        sentinel_tokens = [f"<extra_id_{i}>" for i in range(required_sentinels)]
+        tokens_to_add = [t for t in sentinel_tokens if t not in existing_special_tokens]
+        if tokens_to_add:
+            print(f"Adding {len(tokens_to_add)} sentinel tokens to tokenizer")
+            tokenizer.add_special_tokens({"additional_special_tokens": tokens_to_add})
+
     model = ModernT5ForConditionalGeneration.from_pretrained(args.model_path)
 
-    # Ensure model vocab size is adequate for tokenizer + collator-generated sentinels.
-    # The UL2MoDCollator's fallback logic generates 100 sentinel token IDs starting
-    # from len(tokenizer).
-    num_collator_sentinels = 100  # As defined in collator.py's fallback
-    tokenizer_vocab_size = len(tokenizer)
-    required_model_vocab_size = tokenizer_vocab_size + num_collator_sentinels
-
-    if model.config.vocab_size < required_model_vocab_size:
+    # Resize model embeddings if new tokens were added.
+    if model.config.vocab_size < len(tokenizer):
         print(
-            f"Resizing token embeddings from {model.config.vocab_size} to {required_model_vocab_size} "
-            f"to accommodate collator's sentinel tokens."
+            f"Resizing token embeddings from {model.config.vocab_size} to {len(tokenizer)} "
+            "to accommodate tokenizer's special tokens."
         )
-        model.resize_token_embeddings(required_model_vocab_size)
-        # resize_token_embeddings also updates model.config.vocab_size.
-        # If it didn't, we would need: model.config.vocab_size = required_model_vocab_size
+        model.resize_token_embeddings(len(tokenizer))
 
     # Create data collator
     print("Creating UL2MoDCollator")

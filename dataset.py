@@ -86,8 +86,9 @@ def main() -> None:
 
     DATASETS = [
         ("deepvk/cultura_ru_edu", "train", "text", args.ru),
-        ("HuggingFaceFW/fineweb-edu", "train", "text", args.en),
-        ("angie-chen51/python-github-code", "train", "code", args.code),
+        #("HuggingFaceFW/fineweb-edu", "train", "text", args.en),
+        ("gair-prox/DCLM-pro", "train", "text", args.en),
+        ("angie-chen55/python-github-code", "train", "code", args.code),
     ]
 
     os.makedirs(args.temp_dir, exist_ok=True)

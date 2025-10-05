@@ -38,8 +38,8 @@ class ImprovedUL2CollatorV2:
         # Default UL2 denoisers
         if denoiser_configs is None:
             denoiser_configs = [
-                UL2DenoiserConfig("R", "[NLU]", 0.0, 0.25, max_spans=1),
-                UL2DenoiserConfig("S", "[S2S]", 0.15, 3.0, max_spans=100),
+                UL2DenoiserConfig("S", "[S2S]", 0.0, 0.25, max_spans=1),
+                UL2DenoiserConfig("R", "[NLU]", 0.15, 3.0, max_spans=100),
                 UL2DenoiserConfig("X", "[NLG]", 0.5, 3.0, max_spans=100),
             ]
         
@@ -82,6 +82,7 @@ class ImprovedUL2CollatorV2:
         
         # FIX: Encoder sees only the PREFIX (not full text)
         encoder_input = tokens[:split_idx]
+        encoder_input += [self.sentinel_ids[0]] #добавить в конце нулевой sentinel_ids
         # Decoder predicts the SUFFIX
         decoder_target = tokens[split_idx:]
         
